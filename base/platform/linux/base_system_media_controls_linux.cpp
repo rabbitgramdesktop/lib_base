@@ -12,6 +12,10 @@
 #include <mpris/mpris.hpp>
 
 #include <QtCore/QBuffer>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QStandardPaths>
+#include <QtCore/QUrl>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 #include <ksandbox.h>
@@ -380,15 +384,27 @@ void SystemMediaControls::setArtist(const QString &artist) {
 }
 
 void SystemMediaControls::setThumbnail(const QImage &thumbnail) {
-	QByteArray thumbnailData;
-	QBuffer thumbnailBuffer(&thumbnailData);
-	thumbnail.save(&thumbnailBuffer, "JPG", 87);
+	if (thumbnail.isNull()) {
+		clearThumbnail();
+		return;
+	}
+
+	auto cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+	if (cacheDir.isEmpty()) {
+		cacheDir = QDir::tempPath();
+	}
+	QDir().mkpath(cacheDir);
+	const auto filePath = cacheDir + "/mpris_art.jpg";
+
+	thumbnail.save(filePath, "JPG", 87);
+
+	const auto fileUrl = QUrl::fromLocalFile(filePath).toString();
 
 	auto metadata = GLib::VariantDict::new_(
 		_private->player().get_metadata());
 	metadata.insert_value(
 		"mpris:artUrl",
-		Q2V("data:image/jpeg;base64," + thumbnailData.toBase64()));
+		Q2V(fileUrl));
 	_private->player().set_metadata(metadata.end());
 }
 
@@ -434,6 +450,13 @@ void SystemMediaControls::setVolume(float64 volume) {
 }
 
 void SystemMediaControls::clearThumbnail() {
+	auto cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+	if (cacheDir.isEmpty()) {
+		cacheDir = QDir::tempPath();
+	}
+	const auto filePath = cacheDir + "/mpris_art.jpg";
+	QFile::remove(filePath);
+
 	auto metadata = GLib::VariantDict::new_(
 		_private->player().get_metadata());
 	metadata.remove("mpris:artUrl");
