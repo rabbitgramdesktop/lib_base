@@ -112,6 +112,8 @@ public:
 		return _playerData;
 	}
 
+	QString lastArtFilePath;
+
 	[[nodiscard]] rpl::producer<Command> commandRequests() const {
 		return _commandRequests.events();
 	}
@@ -190,7 +192,6 @@ private:
 	rpl::event_stream<int64> _seekRequests;
 	rpl::event_stream<float64> _volumeChangeRequests;
 	rpl::event_stream<> _updatePositionRequests;
-	QString lastArtFilePath;
 };
 
 SystemMediaControls::Private::Private()
@@ -285,7 +286,7 @@ void SystemMediaControls::Private::init() {
 	if (cacheDir.isEmpty()) {
 		cacheDir = QDir::tempPath();
 	}
-	const auto dir = QDir(cacheDir);
+	auto dir = QDir(cacheDir);
 	for (const auto &file : dir.entryList({ "mpris_art_*.jpg" }, QDir::Files)) {
 		dir.remove(file);
 	}
