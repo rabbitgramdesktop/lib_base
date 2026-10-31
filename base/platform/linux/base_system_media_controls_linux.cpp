@@ -190,6 +190,7 @@ private:
 	rpl::event_stream<int64> _seekRequests;
 	rpl::event_stream<float64> _volumeChangeRequests;
 	rpl::event_stream<> _updatePositionRequests;
+	QString lastArtFilePath;
 };
 
 SystemMediaControls::Private::Private()
@@ -280,6 +281,14 @@ void SystemMediaControls::Private::init() {
 	if (!_dbus.connection || _dbus.ownId) {
 		return;
 	}
+	auto cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+	if (cacheDir.isEmpty()) {
+		cacheDir = QDir::tempPath();
+	}
+	const auto dir = QDir(cacheDir);
+	for (const auto &file : dir.entryList({ "mpris_art_*.jpg" }, QDir::Files)) {
+		dir.remove(file);
+	}
 	auto object = Mpris::ObjectSkeleton::new_("/org/mpris/MediaPlayer2");
 	object.set_media_player2(*this);
 	object.set_media_player2_player(player());
@@ -297,6 +306,10 @@ void SystemMediaControls::Private::init() {
 }
 
 void SystemMediaControls::Private::deinit() {
+	if (!lastArtFilePath.isEmpty()) {
+		QFile::remove(lastArtFilePath);
+		lastArtFilePath = QString();
+	}
 	if (_dbus.ownId) {
 		Gio::bus_unown_name(_dbus.ownId);
 		_dbus.ownId = 0;
@@ -394,18 +407,28 @@ void SystemMediaControls::setThumbnail(const QImage &thumbnail) {
 		cacheDir = QDir::tempPath();
 	}
 	QDir().mkpath(cacheDir);
-	const auto filePath = cacheDir + "/mpris_art.jpg";
 
-	thumbnail.save(filePath, "JPG", 87);
+	static auto counter = 0ULL;
+	const auto filePath = cacheDir
+		+ QString("/mpris_art_%1_%2.jpg")
+			.arg(QCoreApplication::applicationPid())
+			.arg(++counter);
 
-	const auto fileUrl = QUrl::fromLocalFile(filePath).toString();
+	if (thumbnail.save(filePath, "JPG", 87)) {
+		if (!_private->lastArtFilePath.isEmpty() && _private->lastArtFilePath != filePath) {
+			QFile::remove(_private->lastArtFilePath);
+		}
+		_private->lastArtFilePath = filePath;
 
-	auto metadata = GLib::VariantDict::new_(
-		_private->player().get_metadata());
-	metadata.insert_value(
-		"mpris:artUrl",
-		Q2V(fileUrl));
-	_private->player().set_metadata(metadata.end());
+		const auto fileUrl = QUrl::fromLocalFile(filePath).toString();
+
+		auto metadata = GLib::VariantDict::new_(
+			_private->player().get_metadata());
+		metadata.insert_value(
+			"mpris:artUrl",
+			Q2V(fileUrl));
+		_private->player().set_metadata(metadata.end());
+	}
 }
 
 void SystemMediaControls::setDuration(int duration) {
@@ -450,12 +473,10 @@ void SystemMediaControls::setVolume(float64 volume) {
 }
 
 void SystemMediaControls::clearThumbnail() {
-	auto cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
-	if (cacheDir.isEmpty()) {
-		cacheDir = QDir::tempPath();
+	if (!_private->lastArtFilePath.isEmpty()) {
+		QFile::remove(_private->lastArtFilePath);
+		_private->lastArtFilePath = QString();
 	}
-	const auto filePath = cacheDir + "/mpris_art.jpg";
-	QFile::remove(filePath);
 
 	auto metadata = GLib::VariantDict::new_(
 		_private->player().get_metadata());
